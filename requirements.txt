@@ -1,0 +1,12 @@
+gradio==4.44.1
+yt-dlp
+librosa
+opencv-python-headless
+transformers==4.44.2
+torch
+torchvision
+Pillow==10.4.0
+numpy
+scipy
+groq
+einops
