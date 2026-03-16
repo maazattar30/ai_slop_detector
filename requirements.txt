@@ -1,4 +1,3 @@
-gradio==4.44.1
 yt-dlp
 librosa
 opencv-python-headless
