@@ -9,7 +9,7 @@ import os
 import base64
 from PIL import Image
 
-from config import PASSWORD, BUCKETS
+from config import PASSWORD, BUCKETS, BUCKET_THRESHOLDS
 from pipeline import run_pipeline
 
 
@@ -19,7 +19,7 @@ from pipeline import run_pipeline
 
 def check_password(password: str) -> bool:
     if not PASSWORD:
-        return True
+        return True   # no password set = open access
     return password.strip() == PASSWORD.strip()
 
 
@@ -43,23 +43,16 @@ def analyze(
         return (
             "❌ Incorrect password",
             "{}",
-            "<p style='color:red;padding:20px'>Access denied — wrong password</p>"
+            "<p style='color:red'>Access denied</p>"
         )
 
     # URL validation
     url = url.strip()
-    if not url:
-        return (
-            "❌ Please enter a YouTube URL",
-            "{}",
-            "<p style='color:red;padding:20px'>No URL provided</p>"
-        )
-
-    if "youtube" not in url and "youtu.be" not in url:
+    if not url or "youtube" not in url and "youtu.be" not in url:
         return (
             "❌ Please enter a valid YouTube URL",
             "{}",
-            "<p style='color:red;padding:20px'>Invalid URL — must be YouTube</p>"
+            "<p style='color:red'>Invalid URL</p>"
         )
 
     def progress_cb(pct, msg):
@@ -78,7 +71,7 @@ def analyze(
             return (
                 f"❌ Error: {result['error']}",
                 json.dumps(result, indent=2),
-                f"<p style='color:red;padding:20px'>Error: {result['error']}</p>"
+                f"<p style='color:red'>Error: {result['error']}</p>"
             )
 
         html   = _build_report_html(result)
@@ -98,7 +91,7 @@ def analyze(
         return (
             f"❌ Unexpected error: {str(e)}",
             "{}",
-            f"<p style='color:red;padding:20px'>{str(e)}</p>"
+            f"<p style='color:red'>{str(e)}</p>"
         )
 
 
@@ -118,22 +111,22 @@ def _build_report_html(result: dict) -> str:
     emoji       = b_info["emoji"]
     name        = b_info["name"]
 
-    def score_bar(score, bar_color):
+    def score_bar(score, color):
         pct = min(max(score, 0), 100)
         return (
             f"<div style='background:#eee;border-radius:6px;"
             f"height:10px;margin:6px 0'>"
-            f"<div style='background:{bar_color};width:{pct}%;"
+            f"<div style='background:{color};width:{pct}%;"
             f"height:10px;border-radius:6px'></div></div>"
         )
 
     def pill(label):
         colors = {
-            "STRONG AI":     ("background:#FEE2E2", "color:#DC2626"),
-            "MODERATE AI":   ("background:#FEF3C7", "color:#D97706"),
-            "NEUTRAL":       ("background:#F1F5F9", "color:#64748B"),
-            "MODERATE REAL": ("background:#DBEAFE", "color:#2563EB"),
-            "STRONG REAL":   ("background:#DCFCE7", "color:#16A34A"),
+            "STRONG AI":    ("background:#FEE2E2", "color:#DC2626"),
+            "MODERATE AI":  ("background:#FEF3C7", "color:#D97706"),
+            "NEUTRAL":      ("background:#F1F5F9", "color:#64748B"),
+            "MODERATE REAL":("background:#DBEAFE", "color:#2563EB"),
+            "STRONG REAL":  ("background:#DCFCE7", "color:#16A34A"),
         }
         bg, fg = colors.get(
             label, ("background:#F1F5F9", "color:#94A3B8")
@@ -145,29 +138,29 @@ def _build_report_html(result: dict) -> str:
         )
 
     # Signal table rows
-    sig_rows   = result.get("signal_rows", [])
+    sig_rows = result.get("signal_rows", [])
     table_rows = ""
     for row in sig_rows:
         table_rows += (
-            f"<tr style='border-bottom:1px solid #F1F5F9'>"
-            f"<td style='padding:8px 12px;font-weight:600;color:#2C3E50'>"
+            f"<tr>"
+            f"<td style='padding:8px 12px;font-weight:600'>"
             f"{row['feature']}</td>"
-            f"<td style='padding:8px 12px;font-family:monospace;color:#17202A'>"
+            f"<td style='padding:8px 12px;font-family:monospace'>"
             f"{row['value']}</td>"
             f"<td style='padding:8px 12px'>{pill(row['label'])}</td>"
             f"<td style='padding:8px 12px;color:#64748B;font-size:12px'>"
-            f"{row.get('ranges','')}</td>"
+            f"{row['ranges']}</td>"
             f"<td style='padding:8px 12px;color:#64748B;font-size:12px'>"
-            f"{row.get('definition','')}</td>"
+            f"{row['definition']}</td>"
             f"</tr>"
         )
 
-    # Evidence lists
-    def ul(items, item_color="#334155"):
+    # LLM evidence lists
+    def ul(items, color="#334155"):
         if not items:
-            return "<li style='color:#94A3B8'>None detected</li>"
+            return "<li style='color:#94A3B8'>None</li>"
         return "".join(
-            f"<li style='margin:4px 0;color:{item_color}'>{i}</li>"
+            f"<li style='margin:4px 0;color:{color}'>{i}</li>"
             for i in items
         )
 
@@ -178,10 +171,10 @@ def _build_report_html(result: dict) -> str:
     override_html = ""
     if llm.get("module_override"):
         override_html = (
-            f"<div style='background:#FEF9E7;border-left:4px solid "
-            f"#F39C12;padding:12px;margin:12px 0;border-radius:4px'>"
-            f"<b>⚠️ LLM override:</b> "
-            f"{llm.get('override_reason', '')}</div>"
+            f"<div style='background:#FEF9E7;border-left:4px solid"
+            f" #F39C12;padding:12px;margin:12px 0;border-radius:4px'>"
+            f"<b>⚠️ LLM override:</b> {llm.get('override_reason','')}"
+            f"</div>"
         )
 
     html = f"""
@@ -189,106 +182,87 @@ def _build_report_html(result: dict) -> str:
             margin:0 auto;padding:20px'>
 
   <!-- Header -->
-  <div style='background:linear-gradient(135deg,#0F172A,#1E3A5F);
-              color:white;padding:22px;border-radius:12px;
-              margin-bottom:18px'>
-    <h2 style='margin:0;font-size:22px'>🎬 AI Slop Detector</h2>
-    <p style='margin:4px 0 0 0;opacity:0.8;font-size:13px'>
-      {result.get('title', '')[:80]}
+  <div style='background:linear-gradient(135deg,#1F4E79,#2E75B6);
+              color:white;padding:20px;border-radius:10px;
+              margin-bottom:16px'>
+    <h2 style='margin:0'>🎬 MiQ AI Content Detector</h2>
+    <p style='margin:4px 0 0 0;opacity:0.85;font-size:13px'>
+      {result.get('title','')[:80]}
     </p>
   </div>
 
-  <!-- Verdict card -->
+  <!-- Verdict -->
   <div style='background:{color}15;border:2px solid {color};
-              border-radius:12px;padding:24px;margin-bottom:18px;
+              border-radius:10px;padding:20px;margin-bottom:16px;
               text-align:center'>
-    <div style='font-size:48px'>{emoji}</div>
-    <div style='font-size:28px;font-weight:900;color:{color};
-                margin:6px 0'>
+    <div style='font-size:42px'>{emoji}</div>
+    <div style='font-size:26px;font-weight:900;color:{color}'>
       Bucket {bucket} — {name}
     </div>
-    <div style='color:#566573'>
+    <div style='color:#566573;margin-top:6px'>
       AI Score: <b style='color:{color}'>{final_score}</b>/100
       &nbsp;|&nbsp;
-      Confidence: <b style='color:{color}'>{confidence:.0%}</b>
+      Confidence: <b>{confidence:.0%}</b>
     </div>
   </div>
 
   <!-- Score cards -->
-  <div style='display:flex;gap:14px;margin-bottom:18px'>
-    <div style='flex:1;background:white;border:1px solid #E2E8F0;
-                border-radius:8px;padding:16px'>
-      <div style='font-size:11px;color:#94A3B8;
-                  text-transform:uppercase;letter-spacing:0.1em'>
-        Module Score
-      </div>
-      <div style='font-size:30px;font-weight:700;color:#2563EB'>
+  <div style='display:flex;gap:12px;margin-bottom:16px'>
+    <div style='flex:1;background:white;border:1px solid #ddd;
+                border-radius:8px;padding:14px'>
+      <div style='font-size:11px;color:#94A3B8'>MODULE SCORE</div>
+      <div style='font-size:28px;font-weight:700;color:#2563EB'>
         {mod_score:.1f}
       </div>
       {score_bar(mod_score, "#2563EB")}
-      <div style='font-size:11px;color:#94A3B8'>
-        12 signals, Cohen d-weighted
-      </div>
     </div>
-    <div style='flex:1;background:white;border:1px solid #E2E8F0;
-                border-radius:8px;padding:16px'>
-      <div style='font-size:11px;color:#94A3B8;
-                  text-transform:uppercase;letter-spacing:0.1em'>
-        LLM Score
-      </div>
-      <div style='font-size:30px;font-weight:700;color:#7C3AED'>
+    <div style='flex:1;background:white;border:1px solid #ddd;
+                border-radius:8px;padding:14px'>
+      <div style='font-size:11px;color:#94A3B8'>LLM SCORE</div>
+      <div style='font-size:28px;font-weight:700;color:#7C3AED'>
         {llm_score}
       </div>
       {score_bar(llm_score, "#7C3AED")}
-      <div style='font-size:11px;color:#94A3B8'>
-        Llama 4 Scout visual reasoning
-      </div>
     </div>
-    <div style='flex:1;background:{color}10;
+    <div style='flex:1;background:{color}15;
                 border:2px solid {color};
-                border-radius:8px;padding:16px'>
-      <div style='font-size:11px;color:#94A3B8;
-                  text-transform:uppercase;letter-spacing:0.1em'>
-        Final Score
-      </div>
-      <div style='font-size:30px;font-weight:700;color:{color}'>
+                border-radius:8px;padding:14px'>
+      <div style='font-size:11px;color:#94A3B8'>FINAL SCORE</div>
+      <div style='font-size:28px;font-weight:700;color:{color}'>
         {final_score}
       </div>
       {score_bar(final_score, color)}
-      <div style='font-size:11px;color:#94A3B8'>
-        55% module + 45% LLM
-      </div>
     </div>
   </div>
 
   {override_html}
 
   <!-- Explanation -->
-  <div style='background:#EBF5FB;border-left:4px solid #2563EB;
-              padding:16px;border-radius:4px;margin-bottom:18px'>
+  <div style='background:#EBF5FB;border-left:4px solid #2E75B6;
+              padding:14px;border-radius:4px;margin-bottom:16px'>
     <b style='color:#1F4E79'>📋 Explanation:</b><br>
-    <p style='margin:8px 0 0 0;color:#2C3E50;line-height:1.7'>
-      {llm.get('explanation', 'No explanation available.')}
+    <p style='margin:8px 0 0 0;color:#2C3E50'>
+      {llm.get('explanation','')}
     </p>
   </div>
 
   <!-- Evidence panels -->
-  <div style='display:flex;gap:14px;margin-bottom:18px'>
-    <div style='flex:1;background:white;border:1px solid #E2E8F0;
+  <div style='display:flex;gap:12px;margin-bottom:16px'>
+    <div style='flex:1;background:white;border:1px solid #ddd;
                 border-radius:8px;padding:14px'>
       <b style='color:#1F4E79'>🎯 Primary Signals</b>
       <ul style='margin:8px 0 0 0;padding-left:18px'>
         {prim_html}
       </ul>
     </div>
-    <div style='flex:1;background:white;border:1px solid #E2E8F0;
+    <div style='flex:1;background:white;border:1px solid #ddd;
                 border-radius:8px;padding:14px'>
       <b style='color:#1F4E79'>👁 Visual Evidence</b>
       <ul style='margin:8px 0 0 0;padding-left:18px'>
         {vis_html}
       </ul>
     </div>
-    <div style='flex:1;background:white;border:1px solid #E2E8F0;
+    <div style='flex:1;background:white;border:1px solid #ddd;
                 border-radius:8px;padding:14px'>
       <b style='color:#DC2626'>🚩 AI Red Flags</b>
       <ul style='margin:8px 0 0 0;padding-left:18px'>
@@ -298,48 +272,34 @@ def _build_report_html(result: dict) -> str:
   </div>
 
   <!-- Signal table -->
-  <div style='background:white;border:1px solid #E2E8F0;
-              border-radius:8px;margin-bottom:18px'>
-    <div style='padding:14px;border-bottom:1px solid #F1F5F9'>
-      <b style='color:#1F4E79;font-size:15px'>
-        📊 Signal Breakdown
-      </b>
+  <div style='background:white;border:1px solid #ddd;
+              border-radius:8px;margin-bottom:16px'>
+    <div style='padding:14px;border-bottom:1px solid #eee'>
+      <b style='color:#1F4E79'>📊 Signal Breakdown</b>
     </div>
     <div style='overflow-x:auto'>
       <table style='width:100%;border-collapse:collapse;
                     font-size:13px'>
         <thead>
           <tr style='background:#1F4E79;color:white'>
-            <th style='padding:10px 12px;text-align:left'>
-              Feature
-            </th>
-            <th style='padding:10px 12px;text-align:left'>
-              Value
-            </th>
-            <th style='padding:10px 12px;text-align:left'>
-              Signal
-            </th>
-            <th style='padding:10px 12px;text-align:left'>
-              Ranges
-            </th>
+            <th style='padding:10px 12px;text-align:left'>Feature</th>
+            <th style='padding:10px 12px;text-align:left'>Value</th>
+            <th style='padding:10px 12px;text-align:left'>Signal</th>
+            <th style='padding:10px 12px;text-align:left'>Ranges</th>
             <th style='padding:10px 12px;text-align:left'>
               What it measures
             </th>
           </tr>
         </thead>
-        <tbody>
-          {table_rows}
-        </tbody>
+        <tbody>{table_rows}</tbody>
       </table>
     </div>
   </div>
 
-  <!-- Footer -->
-  <div style='color:#94A3B8;font-size:11px;text-align:center;
-              padding:8px'>
-    AI Slop Detector V1 &nbsp;|&nbsp;
-    Signals: 10 modules &nbsp;|&nbsp;
-    LLM: Llama 4 Scout (Groq)
+  <div style='color:#94A3B8;font-size:11px;text-align:center'>
+    MiQ AI Content Detector V1 &nbsp;|&nbsp;
+    LLM: Llama 4 Scout (Groq) &nbsp;|&nbsp;
+    SigLIP: {"enabled" if result.get("signal_rows") else "CPU mode"}
   </div>
 
 </div>"""
@@ -352,69 +312,64 @@ def _build_report_html(result: dict) -> str:
 # ─────────────────────────────────────────────
 
 with gr.Blocks(
-    title="AI Slop Detector",
+    title="AI Content Detector",
     theme=gr.themes.Soft()
 ) as demo:
 
     gr.Markdown("""
-    # 🎬 AI Slop Detector
-    Paste a YouTube URL to classify it as **Human Only**,
-    **Human + AI Tools**, or **AI Generated** using
-    10 signal modules + Llama 4 Scout visual reasoning.
+    # 🎬 MiQ AI Content Detector
+    Paste a YouTube URL to classify it as Human, Human+AI Tools,
+    or AI Generated using 10 signal modules + Llama 4 Scout.
     """)
 
     with gr.Row():
         with gr.Column(scale=2):
             url_input   = gr.Textbox(
-                label       = "YouTube URL *",
-                placeholder = "https://www.youtube.com/watch?v=..."
+                label="YouTube URL *",
+                placeholder="https://www.youtube.com/watch?v=..."
             )
             title_input = gr.Textbox(
-                label       = "Video Title (optional — auto-fetched)",
-                placeholder = "e.g. My Travel Vlog"
+                label="Video Title (optional — auto-fetched)",
+                placeholder="e.g. Life at MiQ"
             )
             desc_input  = gr.Textbox(
-                label       = "Description (optional)",
-                placeholder = "Paste description for text signal analysis...",
-                lines       = 3
+                label="Description (optional)",
+                placeholder="Paste description for text signal analysis...",
+                lines=3
             )
             pass_input  = gr.Textbox(
-                label       = "Password",
-                type        = "password",
-                placeholder = "Enter access password"
+                label="Password",
+                type="password",
+                placeholder="Enter access password"
             )
-            run_btn = gr.Button(
+            run_btn     = gr.Button(
                 "▶  Analyze Video",
-                variant = "primary",
-                size    = "lg"
+                variant="primary"
             )
 
         with gr.Column(scale=1):
             gr.Markdown("""
-            ### Bucket Reference
+            **Bucket Reference**
 
-            🟢 **B1 — Human Only**
-            Real camera, real people, no AI
+            🟢 **B1 Human Only**
+            Real camera, no AI
 
-            🔵 **B2 — Human + AI Tools**
-            Human-made with AI assistance.
+            🔵 **B2 Human + AI Tools**
+            Human-made, AI for editing.
             Also used when uncertain.
 
-            🔴 **B3 — AI Generated**
-            Text-to-video, deepfake, TTS, AI avatar
+            🔴 **B3 AI Generated**
+            Text-to-video, deepfake, TTS
 
             ---
-            ⏱ **Processing time:** ~2-4 min
+            **Processing time:** ~2-4 min
 
-            🔬 **Signals:** 10 modules
+            **Signals:** 10 modules
 
-            🤖 **LLM:** Llama 4 Scout (Groq)
+            **LLM:** Llama 4 Scout (Groq)
             """)
 
-    status_out = gr.Textbox(
-        label       = "Status",
-        interactive = False
-    )
+    status_out = gr.Textbox(label="Status", interactive=False)
 
     with gr.Tabs():
         with gr.Tab("📊 Report Card"):
@@ -423,10 +378,13 @@ with gr.Blocks(
             json_out = gr.Code(language="json")
 
     run_btn.click(
-        fn      = analyze,
-        inputs  = [url_input, title_input, desc_input, pass_input],
-        outputs = [status_out, json_out, report_html]
+        fn=analyze,
+        inputs=[
+            url_input, title_input,
+            desc_input, pass_input
+        ],
+        outputs=[status_out, json_out, report_html]
     )
 
-if __name__ == "__main__":
+if __name__ == "_`_main__":
     demo.launch()
