@@ -1,32 +1,32 @@
 """
 config.py
 ─────────────────────────────────────────────────────────────────
-Production config for HF Space deployment.
-Reads secrets from HF environment variables.
+Production config — reads secrets from environment variables.
+Set these in Railway dashboard → Variables tab.
 ─────────────────────────────────────────────────────────────────
 """
 
 import os
 
 # ─────────────────────────────────────────────
-# SECRETS — set these in HF Space settings
+# SECRETS — set in Railway dashboard → Variables
 # ─────────────────────────────────────────────
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 PASSWORD     = os.getenv("APP_PASSWORD", "")
 
 # ─────────────────────────────────────────────
-# PATHS — all temp, nothing persistent on HF
+# PATHS — /tmp is writable on Railway
 # ─────────────────────────────────────────────
 TEMP_DIR = "/tmp/ai_slop_pipeline"
 
 # ─────────────────────────────────────────────
 # FRAME EXTRACTION — HYBRID FFMPEG
 # ─────────────────────────────────────────────
-FRAME_RESOLUTION  = 1024
-LLM_FRAME_WIDTH   = 768
-LLM_FRAME_COUNT   = 5
+FRAME_RESOLUTION     = 1024
+LLM_FRAME_WIDTH      = 768
+LLM_FRAME_COUNT      = 5
 LLM_FRAMES_PER_IMAGE = 4    # frames per grid image
-MAX_FRAMES_CAP    = 120
+MAX_FRAMES_CAP       = 120
 
 SAMPLING_RATES = {
     "short":  {"max_duration": 120,   "fps": 1.0},
@@ -44,9 +44,9 @@ PITCH_MIN_HZ       = 50
 PITCH_MAX_HZ       = 600
 
 # ─────────────────────────────────────────────
-# SIGLIP — disabled on CPU Basic
+# SIGLIP — disabled on CPU
 # ─────────────────────────────────────────────
-SIGLIP_ENABLED    = False   # flip to True when GPU upgraded
+SIGLIP_ENABLED    = False
 SIGLIP_MODEL      = "google/siglip-base-patch16-224"
 SIGLIP_AI_PROMPTS = [
     "photorealistic AI generated image",
@@ -95,9 +95,9 @@ MODULE_WEIGHT = 0.55
 LLM_WEIGHT    = 0.45
 
 BUCKET_THRESHOLDS = {
-    "B1_max_score":  40,
-    "B2_max_score":  65,
-    "B3_min_score":  65,
+    "B1_max_score":   40,
+    "B2_max_score":   65,
+    "B3_min_score":   65,
     "confidence_min": 0.60,
 }
 

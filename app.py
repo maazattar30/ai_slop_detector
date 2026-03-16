@@ -1,5 +1,5 @@
 """
-app.py — Gradio interface for HF Space
+app.py — Gradio interface
 Password protected AI video detector
 """
 
@@ -429,4 +429,10 @@ with gr.Blocks(
     )
 
 if __name__ == "__main__":
-    demo.launch()
+    # Railway injects PORT env var; fall back to 7860
+    port = int(os.environ.get("PORT", 7860))
+    demo.launch(
+        server_name = "0.0.0.0",
+        server_port = port,
+        share       = False,
+    )
