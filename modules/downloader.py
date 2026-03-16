@@ -7,11 +7,13 @@ import os
 import json
 import subprocess
 import shutil
+import shlex
 from typing import Optional
 
 from config import TEMP_DIR
 
-YT_DLP_CLIENTS   = ["web", "android", "ios"]
+# tv_embedded is most reliable on datacenter/HF IPs
+YT_DLP_CLIENTS   = ["tv_embedded", "ios", "android", "web"]
 MIN_FILE_SIZE_KB  = 100
 SHORT_VIDEO_MAX   = 180
 FORMAT_STRING     = (
@@ -21,15 +23,20 @@ FORMAT_STRING     = (
     "/best"
 )
 
+FFMPEG_PATH = shutil.which("ffmpeg") or "/usr/bin/ffmpeg"
+
 
 def get_video_info(url: str) -> Optional[dict]:
     """Fetch video metadata without downloading."""
     cmd = [
         "yt-dlp", "--dump-json",
-        "--no-download", "--quiet", url
+        "--no-download",
+        "--extractor-args", "youtube:player_client=tv_embedded",
+        url
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
+        print(f"[get_video_info] yt-dlp stderr: {result.stderr[:500]}")
         return None
     try:
         raw = json.loads(result.stdout)
@@ -63,7 +70,9 @@ def download_video(
     duration: Optional[float] = None
 ) -> bool:
     """Download video and apply smart clipping if needed."""
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    parent = os.path.dirname(out_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
 
     if os.path.exists(out_path):
         os.remove(out_path)
@@ -133,105 +142,24 @@ def _try_download(url: str, out_path: str) -> bool:
         cmd = [
             "yt-dlp",
             "--extractor-args", f"youtube:player_client={client}",
+            "--ffmpeg-location", FFMPEG_PATH,
             "-f", FORMAT_STRING,
             "--merge-output-format", "mp4",
             "-o", out_path,
-            "--no-playlist", "--quiet", url
+            "--no-playlist",
+            "--retries", "3",
+            "--fragment-retries", "3",
+            url
         ]
-        subprocess.run(cmd, capture_output=True, text=True)
+        print(f"[_try_download] Trying client={client}")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            print(f"[_try_download] client={client} failed: {result.stderr[:300]}")
+        
         if (os.path.exists(out_path) and
                 os.path.getsize(out_path) > MIN_FILE_SIZE_KB * 1024):
+            print(f"[_try_download] Success with client={client}")
             return True
+
     return False
-
-
-def _smart_clip(
-    input_path:  str,
-    output_path: str,
-    duration:    float
-) -> bool:
-    segments   = _calculate_segments(duration)
-    temp_files = []
-    concat_list = input_path.replace(".mp4", "_concat.txt").replace("_raw", "")
-
-    try:
-        for i, seg in enumerate(segments):
-            seg_path = input_path.replace(
-                ".mp4", f"_seg{i}.mp4"
-            ).replace("_raw", "")
-            cmd = [
-                "ffmpeg",
-                "-ss", str(seg["start"]),
-                "-i", input_path,
-                "-t", str(seg["duration"]),
-                "-c", "copy",
-                "-avoid_negative_ts", "make_zero",
-                seg_path, "-y", "-loglevel", "quiet"
-            ]
-            subprocess.run(cmd, capture_output=True, text=True)
-            if (os.path.exists(seg_path) and
-                    os.path.getsize(seg_path) > 1000):
-                temp_files.append(seg_path)
-
-        if not temp_files:
-            return False
-
-        if len(temp_files) == 1:
-            shutil.move(temp_files[0], output_path)
-            return True
-
-        with open(concat_list, "w") as f:
-            for fp in temp_files:
-                f.write(f"file '{fp}'\n")
-
-        cmd = [
-            "ffmpeg", "-f", "concat", "-safe", "0",
-            "-i", concat_list, "-c", "copy",
-            output_path, "-y", "-loglevel", "quiet"
-        ]
-        subprocess.run(cmd, capture_output=True, text=True)
-
-        return (os.path.exists(output_path) and
-                os.path.getsize(output_path) > 1000)
-
-    finally:
-        for fp in temp_files:
-            if os.path.exists(fp):
-                os.remove(fp)
-        if os.path.exists(concat_list):
-            os.remove(concat_list)
-
-
-def _calculate_segments(duration: float) -> list:
-    seg1_dur   = min(90, duration * 0.4)
-    seg2_dur   = min(60, duration * 0.2)
-    seg3_dur   = min(30, duration * 0.1)
-    seg2_start = (duration / 2) - (seg2_dur / 2)
-    seg3_start = duration - seg3_dur
-    return [
-        {"start": 0,           "duration": seg1_dur},
-        {"start": seg2_start,  "duration": seg2_dur},
-        {"start": seg3_start,  "duration": seg3_dur},
-    ]
-
-
-def _has_auto_captions(raw: dict) -> bool:
-    return bool(raw.get("automatic_captions")) and \
-           not bool(raw.get("subtitles"))
-
-
-def _probe_duration(path: str) -> float:
-    cmd = [
-        "ffprobe", "-v", "quiet",
-        "-print_format", "json",
-        "-show_format", path
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        return 0.0
-    try:
-        return float(
-            json.loads(result.stdout)["format"]["duration"]
-        )
-    except Exception:
-        return 0.0

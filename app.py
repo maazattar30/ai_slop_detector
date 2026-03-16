@@ -40,7 +40,7 @@ def analyze(
     """
     # Password check
     if not check_password(password):
-        return (
+        return gr.Error(
             "❌ Incorrect password",
             "{}",
             "<p style='color:red;padding:20px'>Access denied — wrong password</p>"
