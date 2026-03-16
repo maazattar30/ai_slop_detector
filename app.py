@@ -431,6 +431,23 @@ with gr.Blocks(
 if __name__ == "__main__":
     # Railway injects PORT env var; fall back to 7860
     port = int(os.environ.get("PORT", 7860))
+
+    # Add this right before demo.launch() in app.py
+    import subprocess
+    def test_ytdlp():
+        result = subprocess.run(
+            ["yt-dlp", "--extractor-args", "youtube:player_client=tv_embedded",
+            "--dump-json", "--no-download", 
+            "https://youtu.be/WfbRYr5Xm-M"],
+            capture_output=True, text=True
+        )
+        print("STDOUT:", result.stdout[:200])
+        print("STDERR:", result.stderr[:500])
+        print("RETURNCODE:", result.returncode)
+
+    test_ytdlp()
+
+
     demo.launch(
         server_name = "0.0.0.0",
         server_port = port,
