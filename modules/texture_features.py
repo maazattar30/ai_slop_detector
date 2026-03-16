@@ -1,180 +1,76 @@
 """
-audio_features.py — Production version
-13 audio signals using librosa
+texture_features.py — Production version
+Chromatic aberration, saturation CV, compression artifact
 """
 
-import os
-import subprocess
-import warnings
+import io
 import numpy as np
-import librosa
-
-warnings.filterwarnings("ignore")
-
-from config import (
-    AUDIO_SAMPLE_RATE,
-    SILENCE_THRESHOLD,
-    PITCH_MIN_HZ,
-    PITCH_MAX_HZ,
-)
+import cv2
+from PIL import Image
 
 
-def extract_audio_features(
-    video_path: str,
-    work_dir:   str,
-) -> dict:
-    """Extract all audio features from video."""
-    audio_path = os.path.join(work_dir, "audio.wav")
-    audio_ok   = _extract_audio(video_path, audio_path)
+def extract_texture_features(all_frames: list) -> dict:
+    """
+    Compute texture and compression features from frames.
 
-    if not audio_ok:
-        return _silent_defaults()
+    chromatic_aberration     — real lenses have R/G/B misalignment
+                               AI renders do not
+    saturation_cv            — real scenes have varied saturation
+                               AI palettes are uniform
+    compression_artifact_mean — real video resists re-compression
+                                AI generated content compresses
+                                more cleanly
+    """
+    chrom_vals   = []
+    sat_cv_vals  = []
+    compress_vals = []
 
-    try:
-        y, sr = librosa.load(audio_path, sr=AUDIO_SAMPLE_RATE)
-    except Exception:
-        return _silent_defaults()
+    sample = all_frames[::3] if len(all_frames) > 3 else all_frames
 
-    if float(np.sqrt(np.mean(y ** 2))) < 0.001:
-        return _silent_defaults()
+    for fpath in sample:
+        img_bgr = cv2.imread(fpath)
+        if img_bgr is None:
+            continue
 
-    features = {"audio_present": True}
-    features.update(_pitch_features(y, sr))
-    features.update(_silence_features(y, sr))
-    features.update(_harmonic_features(y, sr))
-    features.update(_spectral_features(y, sr))
-    features.update(_rhythm_features(y, sr))
-    features["speech_detected"] = _detect_speech(features)
-
-    return features
-
-
-def _extract_audio(video_path: str, audio_path: str) -> bool:
-    os.makedirs(os.path.dirname(audio_path), exist_ok=True)
-    cmd = [
-        "ffmpeg", "-i", video_path, "-vn",
-        "-acodec", "pcm_s16le",
-        "-ar", str(AUDIO_SAMPLE_RATE),
-        "-ac", "1", audio_path,
-        "-y", "-loglevel", "quiet"
-    ]
-    subprocess.run(cmd, capture_output=True, text=True)
-    return (os.path.exists(audio_path) and
-            os.path.getsize(audio_path) > 1000)
-
-
-def _pitch_features(y, sr):
-    try:
-        f0, voiced_flag, _ = librosa.pyin(
-            y, fmin=PITCH_MIN_HZ, fmax=PITCH_MAX_HZ,
-            frame_length=2048, hop_length=512
+        # Chromatic aberration
+        b, g, r   = cv2.split(img_bgr)
+        edge_r    = cv2.Canny(r, 50, 150).astype(float)
+        edge_g    = cv2.Canny(g, 50, 150).astype(float)
+        edge_b    = cv2.Canny(b, 50, 150).astype(float)
+        chrom_vals.append(
+            (np.mean(np.abs(edge_r - edge_g)) +
+             np.mean(np.abs(edge_r - edge_b))) / 2
         )
-        voiced_f0 = f0[voiced_flag & ~np.isnan(f0)] \
-            if f0 is not None else np.array([])
-        if len(voiced_f0) > 10:
-            return {
-                "pitch_std_hz":   float(np.std(voiced_f0)),
-                "pitch_range_hz": float(np.ptp(voiced_f0)),
-                "pitch_mean_hz":  float(np.mean(voiced_f0)),
-                "voiced_ratio":   float(np.mean(voiced_flag)),
-            }
-    except Exception:
-        pass
+
+        # Saturation CV
+        hsv     = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+        sat     = hsv[:, :, 1].astype(float)
+        sat_mean = np.mean(sat)
+        sat_cv_vals.append(
+            np.std(sat) / (sat_mean + 1e-8)
+        )
+
+        # Compression artifact
+        pil  = Image.fromarray(
+            cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        )
+        buf  = io.BytesIO()
+        pil.save(buf, "JPEG", quality=50)
+        buf.seek(0)
+        comp = np.array(Image.open(buf).convert("RGB"))
+        orig = np.array(pil)
+        compress_vals.append(
+            np.mean(np.abs(orig.astype(float) -
+                           comp.astype(float)))
+        )
+
     return {
-        "pitch_std_hz": 0.0, "pitch_range_hz": 0.0,
-        "pitch_mean_hz": 0.0, "voiced_ratio": 0.0,
-    }
-
-
-def _silence_features(y, sr):
-    try:
-        rms = librosa.feature.rms(
-            y=y, frame_length=2048, hop_length=512
-        )[0]
-        return {
-            "silence_ratio": float(np.mean(rms < SILENCE_THRESHOLD))
-        }
-    except Exception:
-        return {"silence_ratio": 0.0}
-
-
-def _harmonic_features(y, sr):
-    try:
-        y_harm, y_perc = librosa.effects.hpss(y)
-        he    = float(np.mean(y_harm ** 2))
-        pe    = float(np.mean(y_perc ** 2))
-        total = he + pe + 1e-10
-        return {
-            "harmonic_ratio":    float(he / total * 10),
-            "percussive_energy": float(pe),
-        }
-    except Exception:
-        return {"harmonic_ratio": 0.0, "percussive_energy": 0.0}
-
-
-def _spectral_features(y, sr):
-    try:
-        spec  = np.abs(librosa.stft(y, n_fft=2048, hop_length=512))
-        freqs = librosa.fft_frequencies(sr=sr)
-        return {
-            "spectral_bandwidth_mean": float(np.mean(
-                librosa.feature.spectral_bandwidth(
-                    S=spec, sr=sr, freq=freqs))),
-            "spectral_rolloff_mean": float(np.mean(
-                librosa.feature.spectral_rolloff(
-                    S=spec, sr=sr, roll_percent=0.85))),
-            "spectral_flatness_mean": float(np.mean(
-                librosa.feature.spectral_flatness(S=spec))),
-            "spectral_flatness_std": float(np.std(
-                librosa.feature.spectral_flatness(S=spec))),
-        }
-    except Exception:
-        return {
-            "spectral_bandwidth_mean": 0.0,
-            "spectral_rolloff_mean":   0.0,
-            "spectral_flatness_mean":  0.0,
-            "spectral_flatness_std":   0.0,
-        }
-
-
-def _rhythm_features(y, sr):
-    try:
-        oe     = librosa.onset.onset_strength(y=y, sr=sr)
-        tempo, beats = librosa.beat.beat_track(
-            onset_envelope=oe, sr=sr
-        )
-        bpm = float(
-            tempo[0] if hasattr(tempo, "__len__") else tempo
-        )
-        reg = float(
-            1 - np.std(np.diff(beats)) /
-            (np.mean(np.diff(beats)) + 1e-8)
-        ) if len(beats) > 2 else 0.0
-        return {"tempo_bpm": bpm, "tempo_regularity": reg}
-    except Exception:
-        return {"tempo_bpm": 0.0, "tempo_regularity": 0.0}
-
-
-def _detect_speech(features: dict) -> bool:
-    return (features.get("voiced_ratio", 0) > 0.1 and
-            features.get("pitch_std_hz", 0) > 5)
-
-
-def _silent_defaults() -> dict:
-    return {
-        "audio_present":           False,
-        "pitch_std_hz":            0.0,
-        "pitch_range_hz":          0.0,
-        "pitch_mean_hz":           0.0,
-        "voiced_ratio":            0.0,
-        "silence_ratio":           1.0,
-        "harmonic_ratio":          0.0,
-        "percussive_energy":       0.0,
-        "spectral_bandwidth_mean": 0.0,
-        "spectral_rolloff_mean":   0.0,
-        "spectral_flatness_mean":  0.0,
-        "spectral_flatness_std":   0.0,
-        "tempo_bpm":               0.0,
-        "tempo_regularity":        0.0,
-        "speech_detected":         False,
+        "chromatic_aberration":      float(np.mean(chrom_vals))
+                                     if chrom_vals else 0.0,
+        "saturation_cv":             float(np.mean(sat_cv_vals))
+                                     if sat_cv_vals else 0.0,
+        "compression_artifact_mean": float(np.mean(compress_vals))
+                                     if compress_vals else 0.0,
+        "compression_artifact_std":  float(np.std(compress_vals))
+                                     if compress_vals else 0.0,
     }

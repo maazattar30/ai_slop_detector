@@ -17,7 +17,7 @@ PASSWORD     = os.getenv("APP_PASSWORD", "")
 # ─────────────────────────────────────────────
 # PATHS — all temp, nothing persistent on HF
 # ─────────────────────────────────────────────
-TEMP_DIR = "/tmp/miq_pipeline"
+TEMP_DIR = "/tmp/ai_slop_pipeline"
 
 # ─────────────────────────────────────────────
 # FRAME EXTRACTION — HYBRID FFMPEG
