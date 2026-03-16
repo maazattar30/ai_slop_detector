@@ -386,5 +386,5 @@ with gr.Blocks(
         outputs=[status_out, json_out, report_html]
     )
 
-if __name__ == "__main__":
+if __name__ == "_`_main__":
     demo.launch()

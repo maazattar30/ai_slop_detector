@@ -1,5 +1,5 @@
 ---
-title: AI Content Detector
+title: AI Slop Detector
 emoji: 🎬
 colorFrom: blue
 colorTo: red
@@ -9,20 +9,16 @@ app_file: app.py
 pinned: false
 ---
 
-# AI Content Detector V1
+# AI Slop Detector V1
 
-Classifies YouTube videos into 3 buckets using 10 signal modules
-+ Llama 4 Scout multimodal reasoning.
+Classifies YouTube videos into 3 buckets using 10 signal
+modules + Llama 4 Scout multimodal reasoning.
 
 ## Buckets
 - 🟢 B1 Human Only
-- 🔵 B2 Human + AI Tools
+- 🔵 B2 Human + AI Tools  
 - 🔴 B3 AI Generated
 
 ## Signals
-Audio, texture, motion, optical flow, SigLIP (GPU),
-metadata, text, evidence builder, LLM judge.
-
-## Access
-Password protected.
-```
+Audio, texture, motion, optical flow, metadata,
+text, evidence builder, LLM judge.
