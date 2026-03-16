@@ -2,8 +2,8 @@ yt-dlp
 librosa
 opencv-python-headless
 transformers==4.44.2
-torch
-torchvision
+torch==2.3.0+cpu
+torchvision==0.18.0+cpu
 Pillow==10.4.0
 numpy
 scipy
