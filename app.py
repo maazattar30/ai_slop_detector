@@ -543,13 +543,16 @@ with gr.Blocks(title="AI Slop Detector", theme=gr.themes.Soft()) as demo:
     )
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 7860))
-    demo.launch(
-    server_name    = "0.0.0.0",
-    server_port    = port,
-    share          = False,
-    max_threads    = 1,        # only 1 request at a time
-    concurrency_limit = 1,     # Gradio queue limit
-    )
+  port = int(os.environ.get("PORT", 7860))
 
-    demo.queue(max_size=5, default_concurrency_limit=1)
+  demo.queue(
+      max_size=5,
+      default_concurrency_limit=1
+  )
+
+  demo.launch(
+      server_name="0.0.0.0",
+      server_port=port,
+      share=False,
+      max_threads=1
+  )
