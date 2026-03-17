@@ -168,17 +168,25 @@ def run_pipeline(
         )
 
         # ── Final score + bucket ──────────────────────────────
-        result["final_score"] = round(
-            MODULE_WEIGHT * result["module_score"] +
-            LLM_WEIGHT    * result["llm_score"],
-            1
-        )
         result["confidence"]  = llm_result.get("confidence", 0.5)
-        result["bucket"]      = assign_bucket(
-            result["final_score"],
-            result["confidence"]
-        )
-        result["bucket_name"] = BUCKETS[result["bucket"]]["name"]
+
+        # If LLM overrides module, trust LLM bucket directly
+        if llm_result.get("module_override"):
+            print(f"  [pipeline] LLM override active — using LLM bucket {llm_result.get('bucket')}")
+            result["bucket"]      = llm_result.get("bucket", 2)
+            result["bucket_name"] = BUCKETS[result["bucket"]]["name"]
+            result["final_score"] = round(result["llm_score"], 1)
+        else:
+            result["final_score"] = round(
+                MODULE_WEIGHT * result["module_score"] +
+                LLM_WEIGHT    * result["llm_score"],
+                1
+            )
+            result["bucket"]      = assign_bucket(
+                result["final_score"],
+                result["confidence"]
+            )
+            result["bucket_name"] = BUCKETS[result["bucket"]]["name"]
 
     except Exception as e:
         result["error"] = str(e)

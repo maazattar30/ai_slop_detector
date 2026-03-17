@@ -16,21 +16,43 @@ Classify YouTube videos into one of 3 buckets:
 - Bucket 1 (Human Only): Real camera, real people, no AI in production
 - Bucket 2 (Human + AI Tools): Human creative control, AI used as assistant. Also use this when uncertain.
 - Bucket 3 (AI Generated): Core content is machine generated — text-to-video, TTS, deepfake, AI avatar
+
 You will receive:
-1. A structured signal brief from automated modules
-2. A module-computed AI score (0-100)
+1. A structured signal brief from automated modules (reference only)
+2. A module-computed AI score (treat as ONE data point, NOT ground truth)
 3. Video frames as grid images (each grid contains multiple frames)
 4. Video title and description
-Your task:
-- Use signal brief as primary quantitative evidence
-- Use frames to visually confirm or override signals
-- Look for: natural eye movement, skin texture, motion physics,
-  audio-visual coherence, lighting consistency, background stability
-- When uncertain → assign Bucket 2
+
+YOUR TASK — compute your OWN independent ai_score (0-100):
+- 0-40  = likely real/human
+- 41-64 = uncertain, mixed signals
+- 65-100 = likely AI generated
+
+Scoring rules:
+- Visual inspection of frames is your PRIMARY evidence
+- Signal brief is SECONDARY supporting evidence
+- DO NOT echo back the module score as your ai_score
+- If frames clearly show AI-generated content (animation, CGI faces, text-to-video artifacts) score 70-95
+- If frames clearly show real human/camera footage score 10-35
+- If uncertain score 45-55
+
+Look for: natural eye movement, skin texture, motion physics,
+audio-visual coherence, lighting consistency, background stability,
+animated or synthetic faces, AI art style, text-to-video artifacts.
+
+When uncertain, assign Bucket 2.
+
 Known caveats:
-- Heavy CGI in real films (Avatar, trailers) → NOT AI generated content
+- Heavy CGI in real films (Avatar, trailers) are NOT AI generated content
 - High-production studios can score high on AI signals visually
-- Deepfakes show real body but AI face — look for skin/boundary artifacts
+- Deepfakes show real body but AI face, look for skin/boundary artifacts
+- Animated fruits/animals/objects with synthetic AI faces = Bucket 3
+
+CRITICAL: Your bucket MUST match your ai_score:
+- bucket 1 requires ai_score 0-40
+- bucket 2 requires ai_score 41-64
+- bucket 3 requires ai_score 65-100
+
 Respond ONLY with valid JSON, no text before or after:
 {
   "bucket": <1|2|3>,
@@ -54,10 +76,6 @@ def run_llm_judge(
     llm_frames:     list,
     speech_detected: bool,
 ) -> dict:
-    """
-    Send evidence brief + grid frames to Groq Llama 4 Scout.
-    Returns structured verdict dict.
-    """
     if not GROQ_API_KEY:
         return _fallback(module_score, "No GROQ_API_KEY set")
 
@@ -69,11 +87,14 @@ def run_llm_judge(
             f"Title: {title}\n"
             f"Description: {description or '(none)'}\n"
             f"Speech detected: {speech_detected}\n\n"
-            f"MODULE SCORE: {module_score:.1f} / 100\n"
+            f"MODULE SCORE (reference only, do NOT copy this as your ai_score): "
+            f"{module_score:.1f} / 100\n"
             f"(0-40=likely real, 40-65=uncertain, 65+=likely AI)\n\n"
             f"SIGNAL EVIDENCE BRIEF:\n{evidence_brief}\n\n"
             f"Examine the {len(llm_frames)} grid image(s) attached. "
-            f"Each grid contains multiple frames sampled across the video."
+            f"Each grid contains multiple frames sampled across the video. "
+            f"Use what you SEE in the frames as your primary evidence to "
+            f"compute your own independent ai_score."
         )
 
         content = [{"type": "text", "text": user_text}]
@@ -87,9 +108,7 @@ def run_llm_judge(
                 })
                 content.append({
                     "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{b64}"
-                    }
+                    "image_url": {"url": f"data:image/jpeg;base64,{b64}"}
                 })
 
         response = client.chat.completions.create(
@@ -104,13 +123,14 @@ def run_llm_judge(
 
         raw = response.choices[0].message.content.strip()
 
-        # Strip markdown fences if present
         if "```" in raw:
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
 
-        return json.loads(raw.strip())
+        result = json.loads(raw.strip())
+        result = _fix_bucket_score_consistency(result)
+        return result
 
     except json.JSONDecodeError:
         return _fallback(module_score, "JSON parse failed")
@@ -118,8 +138,28 @@ def run_llm_judge(
         return _fallback(module_score, str(e))
 
 
+def _fix_bucket_score_consistency(result: dict) -> dict:
+    """
+    Ensure bucket and ai_score are consistent.
+    The bucket (visual judgment) is trusted over the score number.
+    """
+    bucket = result.get("bucket", 2)
+    score  = result.get("ai_score", 50)
+
+    if bucket == 3 and score < 65:
+        print(f"[llm_judge] Fixing: bucket=3 but ai_score={score} → 80")
+        result["ai_score"] = 80
+    elif bucket == 1 and score > 40:
+        print(f"[llm_judge] Fixing: bucket=1 but ai_score={score} → 20")
+        result["ai_score"] = 20
+    elif bucket == 2 and (score < 41 or score > 64):
+        print(f"[llm_judge] Fixing: bucket=2 but ai_score={score} → 52")
+        result["ai_score"] = 52
+
+    return result
+
+
 def _encode_image(path: str) -> str:
-    """Encode image file as base64 string."""
     try:
         with open(path, "rb") as f:
             return base64.b64encode(f.read()).decode("utf-8")
@@ -128,10 +168,7 @@ def _encode_image(path: str) -> str:
 
 
 def _fallback(module_score: float, reason: str) -> dict:
-    """Safe fallback if LLM call fails."""
-    bucket = 3 if module_score > 65 else (
-        1 if module_score < 40 else 2
-    )
+    bucket = 3 if module_score > 65 else (1 if module_score < 40 else 2)
     return {
         "bucket":          bucket,
         "ai_score":        int(module_score),
@@ -141,9 +178,6 @@ def _fallback(module_score: float, reason: str) -> dict:
         "visual_evidence": [f"LLM unavailable: {reason}"],
         "module_override": False,
         "override_reason": "",
-        "explanation":     (
-            f"Module score: {module_score:.1f}/100. "
-            f"LLM analysis unavailable: {reason}"
-        ),
+        "explanation":     f"Module score: {module_score:.1f}/100. LLM analysis unavailable: {reason}",
         "red_flags":       [],
     }
