@@ -1,4 +1,5 @@
 gradio>=4.0.0
+openpyxl
 yt-dlp
 librosa
 opencv-python-headless
