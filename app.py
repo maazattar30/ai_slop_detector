@@ -3,18 +3,60 @@ app.py — Gradio interface
 Password protected AI video detector
 """
 
-import gradio as gr
-import json
-import os
-import base64
-import tempfile
-from PIL import Image
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
+import sys
+import logging
 
-from config import PASSWORD, BUCKETS
-from pipeline import run_pipeline
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    stream=sys.stdout,
+)
+log = logging.getLogger("app")
+
+log.info("Starting app.py — importing dependencies...")
+
+try:
+    import gradio as gr
+    log.info("gradio OK")
+except ImportError as e:
+    log.critical("Failed to import gradio: %s", e)
+    raise
+
+try:
+    import json
+    import os
+    import base64
+    import tempfile
+    from PIL import Image
+    log.info("stdlib + Pillow OK")
+except ImportError as e:
+    log.critical("Failed to import stdlib/Pillow: %s", e)
+    raise
+
+try:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    log.info("openpyxl OK")
+except ImportError as e:
+    log.critical("Failed to import openpyxl: %s", e)
+    raise
+
+try:
+    from config import PASSWORD, BUCKETS
+    log.info("config OK")
+except ImportError as e:
+    log.critical("Failed to import config: %s", e)
+    raise
+
+try:
+    from pipeline import run_pipeline
+    log.info("pipeline OK")
+except ImportError as e:
+    log.critical("Failed to import pipeline: %s", e)
+    raise
+
+log.info("All imports successful — building Gradio UI")
 
 
 # ─────────────────────────────────────────────
